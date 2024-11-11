@@ -1,6 +1,3 @@
-from django.db import models
-
-# Create your models here.
 import re
 from django.contrib.auth.models import Permission,Group
 from django.db import models
@@ -10,9 +7,12 @@ from django.utils import timezone
 import random
 from django.core.validators import RegexValidator
 import phonenumbers
-from qaz import settings
+from django.conf import settings
 import uuid
-
+from django.db import models
+from PIL import Image
+from django.core.exceptions import ValidationError
+import uuid
 
 
 # Create your models here.
@@ -31,7 +31,7 @@ class Country_Codes(models.Model):
     country_name = models.CharField(max_length=100,unique=True)
     calling_code = models.CharField(max_length=10,unique=True)
 
-    def _str_(self):
+    def __str__(self):
         return f"{self.country_name} ({self.calling_code})"
     
     class Meta:
@@ -40,14 +40,14 @@ class Country_Codes(models.Model):
 class State(models.Model):
     name = models.CharField(max_length=255)
 
-    def _str_(self):
+    def __str__(self):
         return self.name
 
 class District(models.Model):
     name = models.CharField(max_length=255)
     state = models.ForeignKey(State, on_delete=models.CASCADE)
 
-    def _str_(self):
+    def __str__(self):
         return self.name
 
 GENDER_CHOICES = [
@@ -58,6 +58,7 @@ GENDER_CHOICES = [
 
 PAYMENT_METHOD_CHOICES = [
         ('bank_transfer', 'Bank Transfer'),
+        ('razorpay','razorpay'),
         ('credit_card', 'Credit Card'),
         ('paypal', 'PayPal'),
         ('cash', 'Cash'),
@@ -102,7 +103,7 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser):
-    created_at = models.DateTimeField(auto_now_add = True)
+    created_at = models.DateTimeField(auto_now_add=True)
     # Role-based fields
     is_customer = models.BooleanField(default=False)
     is_service_provider = models.BooleanField(default=False)
@@ -118,14 +119,16 @@ class User(AbstractBaseUser):
     full_name = models.CharField(max_length=255)
     address = models.CharField(max_length=30)
     landmark = models.CharField(max_length=255, blank=True, null=True)
+    place = models.CharField(max_length=20)
     pin_code = models.CharField(max_length=10)
     district = models.ForeignKey('District', on_delete=models.SET_NULL, null=True, blank=True)
     state = models.ForeignKey('State', on_delete=models.SET_NULL, null=True, blank=True)
-    joining_date = models.DateField(null=True,blank=True)
+
     watsapp = models.CharField(max_length=15, blank=True, null=True)
     email = models.EmailField(unique=True, null=True, blank=True)
-    country_code = models.ForeignKey('Country_Codes', on_delete=models.SET_NULL, null=True, blank=True)
     phone_number = models.CharField(max_length=15, unique=True,validators=[phone_regex], null=True, blank=True)
+    country_code = models.ForeignKey('Country_Codes', on_delete=models.SET_NULL, null=True, blank=True)
+
     USERNAME_FIELD = 'email'  
     REQUIRED_FIELDS = []
 
@@ -147,7 +150,7 @@ class User(AbstractBaseUser):
         related_name='app1_user_permissions'  # Add a unique related_name
     )
     
-    def _str_(self):
+    def __str__(self):
         return self.email if self.email else self.phone_number
 
     def has_perm(self, perm, obj=None):
@@ -160,7 +163,7 @@ class Franchise_Type(models.Model):
     name = models.CharField(max_length=255)
     details = models.TextField()
     amount = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.CharField(max_length=50)
+    currency = models.CharField(max_length=50,default="INR")
 
 class Franchisee(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='franchisee')
@@ -189,7 +192,7 @@ class Franchisee(models.Model):
         super(Franchisee, self).save(*args, **kwargs)
 
 
-    def _str_(self):
+    def __str__(self):
         return self.custom_id 
 
     @property
@@ -216,14 +219,14 @@ class Dealer(models.Model):
     def save(self, *args, **kwargs):
         if not self.custom_id:
             # Generate the custom ID format
-            franchisee_id = f'FR{self.franchisee.id}'  # Franchisee ID with prefix FR
+            franchisee_id = self.franchisee.custom_id # Franchisee ID with prefix FR
             
             # Combine to form the custom ID
             self.custom_id = f'D{self.user.id}{franchisee_id}'  # Format: D{id}FR{id}
 
         super(Dealer, self).save(*args, **kwargs)
 
-    def _str_(self):
+    def __str__(self):
         return self.custom_id 
 
 
@@ -248,7 +251,7 @@ class ServiceProvider(models.Model):
     profile_image = models.ImageField(upload_to='s-profile-images/', null=True, blank=True, validators=[validate_file_size])
     date_of_birth = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
-    about = models.TextField()
+    about = models.TextField(null=True,blank=True)
 
     dealer = models.ForeignKey(Dealer, on_delete=models.PROTECT)
     franchisee = models.ForeignKey(Franchisee, on_delete=models.PROTECT)
@@ -266,17 +269,17 @@ class ServiceProvider(models.Model):
     def save(self, *args, **kwargs):
         if not self.custom_id:
             # Generate the custom ID format
-            dealer_id = f'D{self.dealer.id}'  # Dealer ID with prefix D
-            franchisee_id = f'FR{self.franchisee.id}'  # Franchisee ID with prefix FR
+            dealer_id = self.dealer.custom_id  # Dealer ID with prefix D
+            franchisee_id = self.franchisee.custom_id  # Franchisee ID with prefix FR
             
             # Combine to form the custom ID
-            self.custom_id = f'SP{self.user.id}{dealer_id}{franchisee_id}'  # Format: SP{id}D{id}FR{id}
+            self.custom_id = f'SP{self.user.id}{dealer_id}'  # Format: SP{id}D{id}FR{id}
 
         super(ServiceProvider, self).save(*args, **kwargs)
 
 
 
-    def _str_(self):
+    def __str__(self):
         return self.custom_id
 
 class Customer(models.Model):
@@ -289,28 +292,34 @@ class Customer(models.Model):
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     
     status = models.CharField(max_length=10, choices=[('Active', 'Active'), ('Inactive', 'Inactive')])
+    accepted_terms = models.BooleanField(default=False)
 
+     
     def save(self, *args, **kwargs):
         if not self.custom_id:
-            # Find the last existing custom ID
-            last_custom_id = Customer.objects.order_by('custom_id').last()
-            if last_custom_id:
-                # Extract the numeric part and increment
-                match = re.match(r'USER(\d+)', last_custom_id.custom_id)
-                if match:
-                    customer_number = int(match.group(1)) + 1
-                else:
-                    customer_number = 1  # Start from 1 if no previous ID found
-            else:
-                customer_number = 1  # Start from 1 if no previous ID found
-
-            # Create the custom ID with the USER prefix
-            self.custom_id = f'USER{customer_number}'  # No leading zeros
+            # Combine to form the custom ID
+            self.custom_id = f'USER{self.user.id}'  
 
         super(Customer, self).save(*args, **kwargs)
 
-    def _str_(self):
+
+
+    def __str__(self):
         return self.custom_id
+
+class CurrentLocation(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    country = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    place = models.CharField(max_length=100)
+    address = models.TextField()
+    landmark = models.CharField(max_length=100, blank=True, null=True)
+    pincode = models.CharField(max_length=20)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+
+    def _str_(self):
+        return f"{self.user.username} - {self.city}, {self.state}"
 
 class OTP(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE,related_name='otp_received_user')
@@ -331,25 +340,27 @@ class OTP(models.Model):
             self.expires_at = timezone.now() + timezone.timedelta(minutes=5)
         super().save(*args, **kwargs)
 
-    def _str_(self):
+    def __str__(self):
         return f"OTP for {self.user.email or self.user.phone_number} - Expires at {self.expires_at}"
     
 
 class Service_Type(models.Model):
     name = models.CharField(max_length=255)
     details = models.TextField()
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    currency=models.CharField(max_length=10,null=True,blank=True, default="INR")
-    def _str_(self):
-        return self.name  
+    #amount = models.DecimalField(max_digits=10, decimal_places=2)
+    curreny=models.CharField(max_length=10,null=True,blank=True, default="INR")
 
+    def __str__(self):
+        return self.name  
+       
 class Collar(models.Model):
     name = models.CharField(max_length=255)
-    lead_quantity = models.IntegerField(null=True, blank=True)  # Allow it to be optional
+    lead_quantity = models.IntegerField()
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     #currency = models.CharField(max_length=50)
+
     def __str__(self):
-        return self.name        
+        return self.name  
             
 class Category(models.Model):
     title = models.CharField(max_length=50,db_index=True)
@@ -357,7 +368,7 @@ class Category(models.Model):
     description = models.TextField()
     status = models.CharField(max_length=10, choices=[('Active', 'Active'), ('Inactive', 'Inactive')])
 
-    def _str_(self):
+    def __str__(self):
         return self.title 
 
 class Subcategory(models.Model):
@@ -366,41 +377,28 @@ class Subcategory(models.Model):
     image = models.ImageField(upload_to='subcategory-images/', null=True, blank=True, validators=[validate_file_size])  
     description = models.TextField() 
     service_type = models.ForeignKey(Service_Type, on_delete=models.PROTECT,related_name='service_type')
-    collar=models.ForeignKey(Collar,on_delete=models.PROTECT,related_name='collar')
+    collar = models.ForeignKey(Collar,on_delete=models.PROTECT,related_name='collar')
     status = models.CharField(max_length=10, choices=[('Active', 'Active'), ('Inactive', 'Inactive')]) 
-    def _str_(self):
+
+    def __str__(self):
         return self.title  
 
 class ServiceRegister(models.Model):
-    id=models.UUIDField(primary_key=True,default=uuid.uuid4,editable=False)
+    booking_id=models.UUIDField(default=uuid.uuid4,editable=False,unique=True)
     service_provider = models.ForeignKey(ServiceProvider, on_delete=models.CASCADE, related_name='services')
     description = models.TextField()
     gstcode = models.CharField(max_length=50)
     category = models.ForeignKey(Category, on_delete=models.PROTECT,related_name='serviceregister_category')    
     subcategory = models.ForeignKey(Subcategory, on_delete=models.PROTECT,related_name='serviceregister_subcategory') 
-    title = models.CharField(max_length=200, default=True)  
     license = models.FileField(upload_to='service-license/', blank=True, null=True, validators=[validate_file_size])
     image = models.ImageField(upload_to='service-images/', null=True, blank=True, validators=[validate_file_size])
-    status = models.CharField(max_length=10, choices=[('Active', 'Active'), ('Inactive', 'Inactive')],default='Active')
+    status = models.CharField(max_length=10, choices=[('Active', 'Active'), ('Inactive', 'Inactive')],default='Inctive')
     accepted_terms = models.BooleanField(default=False)
     available_lead_balance = models.IntegerField(default=0)
 
     def __str__(self):
         return f"{self.subcategory.title} by {self.service_provider}"
-    '''
-    def update_lead_balance(self, extra_leads=0):
-        """Update available lead balance by adding extra leads from the collar in the subcategory."""
-        if self.subcategory.service_type.name == "One Time Lead" and self.subcategory.collar:
-            # Ensure the available_lead_balance is an integer before performing addition
-            if not self.available_lead_balance:
-                self.available_lead_balance = 0  # Initialize if it's empty or None
-            # Increment lead balance by collar's lead quantity and extra_leads
-            self.available_lead_balance += self.subcategory.collar.lead_quantity + extra_leads
-            self.save()  # Save changes to the database
-            return self.available_lead_balance
-        # Return the current balance if not a "One Time Lead"
-        return self.available_lead_balance
-    '''
+   
     def update_lead_balance(self, extra_leads=1):
         """
         Update the available lead balance by adding extra leads based on the subcategory's collar.
@@ -410,7 +408,7 @@ class ServiceRegister(models.Model):
             # Calculate the amount per lead from the collar model
             lead_quantity = self.subcategory.collar.lead_quantity
             collar_amount = float(self.subcategory.collar.amount)
-
+            
             # Update the available lead balance by adding the specified leads
             self.available_lead_balance += lead_quantity * extra_leads
             self.save()
@@ -439,10 +437,8 @@ class ServiceRegister(models.Model):
         if self.subcategory and self.subcategory.service_type.name == 'Daily Work':
             # No collar is needed for 'Daily Work' service type
             self.available_lead_balance = 0  # You can adjust logic for infinite leads here
-        super(ServiceRegister, self).save(*args, **kwargs)
-
-
-
+        super(ServiceRegister, self).save(*args, **kwargs) 
+   
 class PaymentRequest(models.Model):
     service_provider = models.ForeignKey(ServiceProvider, on_delete=models.PROTECT,related_name='from_paymentrequest')
     dealer = models.ForeignKey(Dealer, on_delete=models.PROTECT,related_name='to_paymentrequest')
@@ -461,9 +457,11 @@ class PaymentRequest(models.Model):
     ifsc_code = models.CharField(max_length=50)
     supporting_documents = models.FileField(upload_to='payment-request/', blank=True, null=True, validators=[validate_file_size])
 
-    def _str_(self):
+
+    def __str__(self):
         return f"Request by {self.service_provider.full_name} to {self.dealer.name} for {self.amount}"
-    
+
+
 class ServiceRequest(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -471,27 +469,30 @@ class ServiceRequest(models.Model):
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
     ]
-
+    
+    booking_id = models.CharField(max_length=10, unique=True, editable=False)
+    title = models.CharField(max_length=20,null=True,blank=True)
     customer = models.ForeignKey(User, on_delete=models.PROTECT,related_name='from_servicerequest')
     service_provider = models.ForeignKey(User, on_delete=models.PROTECT,related_name='to_servicerequest')
-    service = models.ForeignKey(ServiceRegister, on_delete=models.PROTECT,related_name='servicerequest')
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    service = models.ForeignKey(ServiceRegister, on_delete=models.CASCADE,related_name='servicerequest')
     work_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    updated_at = models.DateTimeField(auto_now=True)
     acceptance_status = models.CharField(max_length=20,choices=[('accept', 'accept'), ('decline', 'decline'),('pending', 'pending')],default='pending')
     request_date = models.DateTimeField(auto_now_add=True)
     availability_from = models.DateTimeField()  # New field for availability start
     availability_to = models.DateTimeField()    # New field for availability end
     additional_notes = models.TextField(blank=True, null=True)
     image = models.ImageField(upload_to='service_request/', null=True, blank=True, validators=[validate_file_size])
-    booking_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
-    title = models.CharField(max_length=20,null=True,blank=True)
+    reschedule_status = models.BooleanField(default=False)  # New field for rescheduling status
+
+
+    def __str__(self):
+        return f"Request by {self.customer.full_name} for {self.service} ({self.acceptance_status})"
 
     def clean(self):
         # Ensure the availability_from is before availability_to
         if self.availability_from >= self.availability_to:
-            raise ValidationError('Availability "from" time must be before "to" time.')   
-    def __str__(self):
-        return f"Request by {self.customer.full_name} for {self.service} ({self.acceptance_status})"
+            raise ValidationError('Availability "from" time must be before "to" time.')    
 
 class CustomerReview(models.Model):
     RATING_CHOICES = [
@@ -502,53 +503,63 @@ class CustomerReview(models.Model):
         (5, '5 Stars'),
     ]
 
-    customer = models.ForeignKey(User, on_delete=models.PROTECT,related_name='from_review')  # The customer leaving the revie
-    servicer_request = models.ForeignKey(ServiceRequest,on_delete=models.SET_NULL, null=True, blank=True, related_name='reviews')
+    customer = models.ForeignKey(User, on_delete=models.PROTECT,related_name='from_review')  # The customer leaving the review
     service_provider = models.ForeignKey(User, on_delete=models.PROTECT,related_name='to_review')  # The service provider being reviewed
+    service_request = models.ForeignKey(ServiceRequest,on_delete=models.SET_NULL,null=True,blank=True,related_name='servicerequest')
     rating = models.IntegerField(choices=RATING_CHOICES)  # Rating from 1 to 5 stars
     image = models.ImageField(upload_to='reviews/', null=True, blank=True, validators=[validate_file_size])
     comment = models.TextField(blank=True, null=True)  # Optional comment
-    created_at = models.DateTimeField(auto_now_add=True)  # Auto-set the review date 
+    created_at = models.DateTimeField(auto_now_add=True)  # Auto-set the review date
 
-    def _str_(self):
-        return f"{self.customer.full_name} - {self.service_provider.full_name} ({self.rating} stars)"  
+    def __str__(self):
+        return f"{self.customer.full_name} - {self.service_provider.full_name} ({self.rating} stars)"
+    
 
 class Invoice(models.Model):
     INVOICE_TYPE_CHOICES = [
         ('service_request', 'Service Request'),
         ('dealer_payment', 'Dealer Payment'),
         ('provider_payment', 'Service Provider Payment'),
-        ('Ads' ,'Ads'),
         ('service_registration','service_registration'),
-        ('lead_purchase','lead_purchase')
+        ('Ads' ,'Ads'),
+        ('lead_purchase','lead_purchase'),
+        ('others','others')
     ]
     
     invoice_number = models.PositiveIntegerField(unique=True, editable=False)
+
     #invoice_type: This field determines whether the invoice is related to a Service Request payment (service_request), a Dealer Payment (dealer_payment), or a Service Provider Payment (provider_payment).
     invoice_type = models.CharField(max_length=20, choices=INVOICE_TYPE_CHOICES)
     
+    #description field to explain others
+    description = models.CharField(null=True, blank=True, max_length=30)
+
     #A foreign key that links to a ServiceRequest model, which is populated if the payment is related to a customer requesting a service.
-    service_request = models.ForeignKey(ServiceRequest, on_delete=models.SET_NULL, null=True, blank=True,related_name='invoices')
+    service_request = models.ForeignKey(ServiceRequest, on_delete=models.SET_NULL, null=True, blank=True,related_name='servicerequests_invoices')
+    
+    #A foreign key that links to a ServiceRequest model, which is populated if the payment is related to a customer requesting a service.
     service_register = models.ForeignKey(ServiceRegister, on_delete=models.SET_NULL, null=True, blank=True,related_name='serviceregister_invoices')
 
     # Sender (user who is paying) and receiver (user receiving payment)
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='sent_payment')
     receiver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='received_payment')
+    
     quantity = models.IntegerField(null=True, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    partial_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, default=0)  # New field for partial amount
+    partial_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, default=0)  # New field for partial payment
     payment_balance = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, default=0)
-    payment_status = models.CharField(max_length=20, choices=[('pending', 'Pending'), ('paid', 'Paid'), ('cancelled', 'Cancelled')], default='pending')
+    payment_status = models.CharField(max_length=20, choices=[('pending', 'Pending'), ('paid', 'Paid'), ('partially paid', 'partially paid'), ('cancelled', 'Cancelled')], default='pending')
 
     invoice_date = models.DateTimeField(auto_now_add=True)
     due_date = models.DateTimeField(null=True, blank=True)
     
-    appointment_date = models.DateTimeField()
+    appointment_date = models.DateTimeField(null=True, blank=True)
     additional_requirements = models.TextField(null=True, blank=True)
+    invoice_document = models.FileField(upload_to='invoice-documents/', blank=True, null=True, validators=[validate_file_size])
     accepted_terms = models.BooleanField(default=False)
 
-    def _str_(self):
+    def __str__(self):
         if self.service_request:
             return f"Invoice for Service Request {self.service_request} - {self.payment_status}"
         else:
@@ -563,11 +574,12 @@ class Invoice(models.Model):
         """Method to cancel the invoice."""
         self.payment_status = 'cancelled'
         self.save()
+
     def save(self, *args, **kwargs):
-            if not self.invoice_number:
-                last_invoice = Invoice.objects.order_by('invoice_number').last()
-                self.invoice_number = last_invoice.invoice_number + 1 if last_invoice else 1
-            super().save(*args, **kwargs)    
+        if not self.invoice_number:
+            last_invoice = Invoice.objects.order_by('invoice_number').last()
+            self.invoice_number = last_invoice.invoice_number + 1 if last_invoice else 1
+        super().save(*args, **kwargs)    
 
 class Payment(models.Model):
 
@@ -575,26 +587,20 @@ class Payment(models.Model):
         ('pending', 'Pending'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
-        ('rescheduled', 'rescheduled'),
-        ('partially paid', 'partially paid'),
     ]
 
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='payments')
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='sent_payments')  # User who sends the payment
     receiver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='received_payments')  # User who receives the payment
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    transaction_id = models.CharField(max_length=15)
+    transaction_id = models.CharField(max_length=25)
     order_id = models.CharField(max_length=100, null=True, blank=True)
     signature = models.CharField(max_length=256, null=True, blank=True)
-
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2)
-    payment_method = models.CharField(max_length=50, choices=PAYMENT_METHOD_CHOICES)
+    payment_method = models.CharField(max_length=50, choices=PAYMENT_METHOD_CHOICES,default='razorpay')
     payment_date = models.DateTimeField(default=timezone.now)
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
-    description = models.TextField(null=True, max_length=200 ,blank=True)
-
-
-    def _str_(self):
+    
+    def __str__(self):
         return f"Payment of {self.amount_paid} by {self.sender} to {self.receiver}"
 
     def mark_completed(self):
@@ -615,11 +621,9 @@ class Complaint(models.Model):
     ]
     
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='sent_compliant')  
-    receiver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='received_compliant')    
+    receiver = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='received_compliant')  
     service_request = models.ForeignKey(ServiceRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name='complaints')  # Optional link to service request
     subject = models.CharField(max_length=255)
-    
-    
     description = models.TextField()
     images = models.ImageField(upload_to='complaint/', null=True, blank=True, validators=[validate_file_size])
     submitted_at = models.DateTimeField(auto_now_add=True)
@@ -627,8 +631,8 @@ class Complaint(models.Model):
     resolved_at = models.DateTimeField(null=True, blank=True)
     resolution_notes = models.TextField(null=True, blank=True)
 
-    def _str_(self):
-        return f"Complaint by {self.customer} - {self.subject} ({self.status})"
+    def __str__(self):
+        return f"Complaint by {self.sender} - {self.subject} ({self.status})"
     
     def mark_as_resolved(self, resolution_notes=''):
         self.status = 'resolved'
@@ -646,14 +650,31 @@ class Complaint(models.Model):
         self.save()
 
 
-class AdminProfile(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    department = models.CharField(max_length=100)
-    designation = models.CharField(max_length=100, null=True)
-    role = models.CharField(max_length=100)  
-    profile_picture = models.ImageField(upload_to='admin_pics/', blank=True, null=True)
-    certifications = models.TextField(blank=True, null=True)  
+class DeclineServiceModel(models.Model):
+    decline_reason = models.TextField()
+    images = models.ImageField(upload_to='decline/', null=True, blank=True, validators=[validate_file_size])
+    service_requests = models.ForeignKey(ServiceRequest, on_delete=models.SET_NULL,
+                                         null=True, blank=True, related_name='decline_services')
 
+    # def __str__(self):
+    #     return f"Service of {self.service_requests.customer.full_name} is declined by {self.service_requests.service_provider.full_name}"
+
+    def __str__(self):
+        if self.service_requests and self.service_requests.customer:
+            return f"Service of {self.service_requests.customer.full_name} is declined by {self.service_requests.service_provider.full_name}"
+        return "Service decline request without associated customer."
+    
+
+def validate_ad_size(image):
+    img = Image.open(image)
+    width, height = image.size
+
+    # Define your desired dimensions
+    max_width = 800
+    max_height = 400 
+
+    if width != max_width or height != max_height:
+        raise ValidationError(f"Image dimensions must be {max_width}x{max_height}.")
 
 
 TARGET_AREA_CHOICES = [
@@ -666,86 +687,29 @@ AD_TYPE = [
     ('card','Card Ad'),
     ('pop_up','Pop Up Ad'),
 ]
-
-
-TARGET_AREA_CHOICES = [
-    ('up_to_5_km','Up to 5 km'),
-    ('up_to_10_km','Up to 10 km'),
-    ('up_to_15_km','Up to 15 km'),
-]
-AD_TYPE = [
-    ('banner','Banner Ad'),
-    ('card','Card Ad'),
-    ('pop_up','Pop Up Ad'),
-]
-
-
-
 class Ad_category(models.Model):
-    ad_type = models.CharField(max_length=50,choices=AD_TYPE)
+    # ad_title = models.CharField(max_length=100)
+    type = models.CharField(max_length=50,choices=AD_TYPE)
     description = models.CharField(max_length=200)
     rate = models.DecimalField(max_digits=5, decimal_places=2)
     currency = models.CharField(max_length=10,default="INR")
+    # ad_image = models.ImageField(upload_to='ad_image/', validators=[validate_ad_size])
     status = models.CharField(max_length=20,choices=[('Active','Active'),('Inactive','Inactive')],default='Active')
     total_views = models.IntegerField(null=True,blank=True)
     total_hits = models.IntegerField(null=True,blank=True)
     image_width = models.IntegerField()
     image_height = models.IntegerField()
-    def __str__(self):
-        return self.ad_type
-
-
-def validate_ad_size(image):
-        img = Image.open(image)
-        width, height = image.size
-
-        if width != max_width or height != max_height:
-            raise ValidationError(f"Image dimensions must be {max_width}x{max_height}.")
-
 
 class Ad_Management(models.Model):
-    ad_id = models.PositiveIntegerField(blank=True,null=True)
+    ad_id = models.PositiveIntegerField()
     title = models.CharField(max_length=100)
     description = models.CharField(max_length=200)
     ad_category = models.ForeignKey(Ad_category,on_delete=models.CASCADE,related_name='ad_category')
-    ad_user = models.ForeignKey(User,on_delete=models.PROTECT,related_name='ad_user')
+    ad_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ad_user')
     valid_from = models.DateTimeField()
     valid_up_to = models.DateTimeField()
     target_area = models.CharField(max_length=100,choices=TARGET_AREA_CHOICES, default='up_to_5_km')
-    total_days = models.IntegerField(null=True,blank=True)
-    total_amount = models.DecimalField(max_digits=5,decimal_places=2,null=True,blank=True)
-    image = models.ImageField(upload_to='ad_images/',validators=[validate_ad_size],null=True,blank=True)
-
-
-
-
-
-class IncomeManagement(models.Model):
-    sl_no = models.AutoField(primary_key=True)
-    income_type = models.CharField(
-        max_length=50,
-        choices=[
-            ('Franchisee Registration', 'Franchisee Registration'),
-            ('Service Registration', 'Service Registration'),
-            ('Banner Ads', 'Banner Ads'),
-            ('Card Ads', 'Card Ads'),
-            ('Popup Ads', 'Popup Ads'),
-            ('Boost Profile', 'Boost Profile'),
-            ('Service Commission', 'Service Commission'),
-            ('Lead Commission', 'Lead Commission'),
-        ]
-    )
-    split_type = models.CharField(
-        max_length=20,
-        choices=[('Percentage', 'Percentage'), ('Amount', 'Amount')],
-        default='Percentage'
-    )
-    company = models.IntegerField()
-    franchisee = models.IntegerField()
-    dealer = models.IntegerField()
-    service_provider = models.IntegerField()
-
-    def __str__(self):
-        return f"{self.sl_no} - {self.income_type}"
-
-
+    total_days = models.IntegerField()
+    total_amount = models.DecimalField(max_digits=5,decimal_places=2)
+    image = models.ImageField(upload_to='ad_images/',validators=[])
+      
